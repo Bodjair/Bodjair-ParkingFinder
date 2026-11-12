@@ -19,7 +19,9 @@ class OverpassRepository(private val prices: PriceProvider) {
 
     private val endpoints = listOf(
         "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.openstreetmap.fr/api/interpreter",
         "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     )
 
@@ -54,7 +56,7 @@ class OverpassRepository(private val prices: PriceProvider) {
 
     suspend fun nearby(lat: Double, lng: Double, radius: Int = 1500): List<ParkingSpot> =
         withContext(Dispatchers.IO) {
-            val query = "[out:json][timeout:25];(" +
+            val query = "[out:json][timeout:15];(" +
                 "node[\"amenity\"=\"parking\"](around:$radius,$lat,$lng);" +
                 "way[\"amenity\"=\"parking\"](around:$radius,$lat,$lng);" +
                 ");out center tags 80;"

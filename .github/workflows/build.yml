@@ -22,11 +22,6 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Write Maps API key
-        env:
-          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
-        run: echo "MAPS_API_KEY=$MAPS_API_KEY" > local.properties
-
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
 

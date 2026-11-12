@@ -1,7 +1,9 @@
 package com.example.parkingfinder
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -17,26 +19,38 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.parkingfinder.data.ParkingSpot
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.*
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Configuration.getInstance().apply {
+            load(applicationContext, getSharedPreferences("osmdroid", MODE_PRIVATE))
+            userAgentValue = packageName   // обов'язково для серверів плиток OSM
+        }
         setContent { MaterialTheme { Screen(vm) } }
     }
 }
 
-private fun money(v: Double?) = if (v == null) "—" else "$" + "%.2f".format(v)
+private fun money(v: Double?): String = when {
+    v == null -> "—"
+    v == 0.0 -> "$0"
+    else -> "$" + "%.2f".format(v)
+}
+
+/** "~" перед ціною означає демо-ціну (не реальну). */
+private fun priceText(v: Double?, demo: Boolean) = (if (demo && v != null) "~" else "") + money(v)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,47 +71,75 @@ private fun Screen(vm: MainViewModel) {
         )
     }
 
-    val camera = rememberCameraPositionState()
-    LaunchedEffect(state.me) {
-        state.me?.let { camera.position = CameraPosition.fromLatLngZoom(it, 15f) }
+    val tierMap = remember(state.spots) { computeTiers(state.spots) }
+    val badges = remember(state.spots, tierMap) {
+        state.spots.associate { s ->
+            val tier = tierMap[s.id] ?: Tier.MID
+            s.id to BitmapDrawable(
+                ctx.resources,
+                priceBitmap(
+                    ctx,
+                    priceText(s.pricePerHour, s.isDemoPrice) + "/год",
+                    priceText(s.pricePerDay, s.isDemoPrice) + "/доба",
+                    tier,
+                )
+            )
+        }
     }
 
-    val tierMap = remember(state.spots) { computeTiers(state.spots) }
-
     Scaffold(
-        topBar ={ TopAppBar(title = { Text("Parking Finder") }) },
+        topBar = { TopAppBar(title = { Text("Parking Finder") }) },
         floatingActionButton = {
             FloatingActionButton(onClick = { if (granted) vm.refresh() }) { Text("⟳") }
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                GoogleMap(
+                AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    cameraPositionState = camera,
-                    properties = MapProperties(isMyLocationEnabled = granted),
-                ) {
-                    state.spots.forEach { s ->
-                        val tier = tierMap[s.id] ?: Tier.MID
-                        val icon = remember(s.id, s.pricePerHour, s.pricePerDay, tier) {
-                            priceBitmap(
-                                ctx,
-                                money(s.pricePerHour) + "/год",
-                                money(s.pricePerDay) + "/доба",
-                                tier,
-                            )
+                    factory = { c ->
+                        MapView(c).apply {
+                            setTileSource(TileSourceFactory.MAPNIK)
+                            setMultiTouchControls(true)
+                            controller.setZoom(16.0)
+                            controller.setCenter(GeoPoint(39.8283, -98.5795)) // центр США
                         }
-                        Marker(
-                            state = rememberMarkerState(key = s.id, position = LatLng(s.lat, s.lng)),
-                            title = s.name,
-                            snippet = "${money(s.pricePerHour)}/год · ${money(s.pricePerDay)}/доба",
-                            icon = icon,
-                            anchor = Offset(0.5f, 1f),
-                            zIndex = if (tier == Tier.CHEAP) 2f else 1f,
-                            onClick = { vm.select(s); false },
-                        )
-                    }
-                }
+                    },
+                    update = { map ->
+                        map.overlays.clear()
+                        state.me?.let { me ->
+                            if (map.tag != me) {
+                                map.controller.setCenter(me)
+                                map.tag = me
+                            }
+                            map.overlays.add(Marker(map).apply {
+                                position = me
+                                title = "Ви тут"
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            })
+                        }
+                        // зелені додаємо останніми, щоб були поверх
+                        state.spots.sortedByDescending { tierMap[it.id]?.ordinal ?: 1 }.forEach { s ->
+                            map.overlays.add(Marker(map).apply {
+                                position = GeoPoint(s.lat, s.lng)
+                                icon = badges[s.id]
+                                title = s.name
+                                snippet = s.address
+                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                setOnMarkerClickListener { m, _ ->
+                                    vm.select(s); m.showInfoWindow(); true
+                                }
+                            })
+                        }
+                        map.invalidate()
+                    },
+                    onRelease = { it.onDetach() },
+                )
+                Text(
+                    "© OpenStreetMap contributors",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
+                )
                 if (state.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
             }
 
@@ -107,7 +149,7 @@ private fun Screen(vm: MainViewModel) {
 
             if (state.spots.any { it.isDemoPrice }) {
                 Text(
-                    "Ціни демонстраційні, не реальні",
+                    "~ означає демо-ціну (не реальну). Ціни без ~ взяті з OpenStreetMap.",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
@@ -115,14 +157,15 @@ private fun Screen(vm: MainViewModel) {
 
             LazyColumn(Modifier.weight(1f)) {
                 items(state.spots, key = { it.id }) { s ->
-                    SpotRow(s, tierMap[s.id] ?: Tier.MID, selected = s.id == state.selected?.id) {
+                    SpotRow(s, tierMap[s.id] ?: Tier.MID) {
                         vm.select(s)
-                        ctx.startActivity(
-                            Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse("google.navigation:q=${s.lat},${s.lng}")
-                            ).setPackage("com.google.android.apps.maps")
+                        val uri = Uri.parse(
+                            "geo:${s.lat},${s.lng}?q=${s.lat},${s.lng}(${Uri.encode(s.name)})"
                         )
+                        try {
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        } catch (_: ActivityNotFoundException) {
+                        }
                     }
                     HorizontalDivider()
                 }
@@ -132,22 +175,25 @@ private fun Screen(vm: MainViewModel) {
 }
 
 @Composable
-private fun SpotRow(s: ParkingSpot, tier: Tier, selected: Boolean, onClick: () -> Unit) {
+private fun SpotRow(s: ParkingSpot, tier: Tier, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
             Text(s.name, style = MaterialTheme.typography.titleMedium)
-            Text(s.address, style = MaterialTheme.typography.bodySmall)
+            if (s.address.isNotBlank()) Text(s.address, style = MaterialTheme.typography.bodySmall)
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(
-                money(s.pricePerHour) + "/год",
+                priceText(s.pricePerHour, s.isDemoPrice) + "/год",
                 style = MaterialTheme.typography.titleMedium,
                 color = Color(tier.argb),
             )
-            Text(money(s.pricePerDay) + "/доба", style = MaterialTheme.typography.bodySmall)
+            Text(
+                priceText(s.pricePerDay, s.isDemoPrice) + "/доба",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

@@ -8,8 +8,6 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import com.example.parkingfinder.data.ParkingSpot
-import com.google.android.gms.maps.model.BitmapDescriptor
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
 
 enum class Tier(val argb: Int, val textArgb: Int) {
     CHEAP(0xFF2E7D32.toInt(), 0xFFFFFFFF.toInt()),   // зелений
@@ -34,7 +32,7 @@ fun computeTiers(spots: List<ParkingSpot>): Map<String, Tier> {
 }
 
 /** Малює «бейдж» з двома рядками: ціна за годину та за добу. */
-fun priceBitmap(ctx: Context, hourText: String, dayText: String, tier: Tier): BitmapDescriptor {
+fun priceBitmap(ctx: Context, hourText: String, dayText: String, tier: Tier): Bitmap {
     val d = ctx.resources.displayMetrics.density
     val padH = 8 * d
     val padV = 5 * d
@@ -42,9 +40,11 @@ fun priceBitmap(ctx: Context, hourText: String, dayText: String, tier: Tier): Bi
 
     val bold = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = tier.textArgb; textSize = 14 * d; typeface = Typeface.DEFAULT_BOLD
+        textAlign = Paint.Align.CENTER
     }
     val small = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = tier.textArgb; textSize = 11 * d
+        textAlign = Paint.Align.CENTER
     }
     val w = maxOf(bold.measureText(hourText), small.measureText(dayText)) + 2 * padH
     val line1 = -bold.fontMetrics.ascent
@@ -71,10 +71,7 @@ fun priceBitmap(ctx: Context, hourText: String, dayText: String, tier: Tier): Bi
     }
     c.drawPath(tri, fill)
 
-    bold.textAlign = Paint.Align.CENTER
-    small.textAlign = Paint.Align.CENTER
     c.drawText(hourText, cx, 1f + padV + line1, bold)
     c.drawText(dayText, cx, 1f + padV + line1 + 2 * d + line2, small)
-
-    return BitmapDescriptorFactory.fromBitmap(bmp)
+    return bmp
 }

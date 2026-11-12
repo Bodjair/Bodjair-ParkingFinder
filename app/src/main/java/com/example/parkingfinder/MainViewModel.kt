@@ -5,27 +5,27 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.parkingfinder.data.DemoPriceProvider
+import com.example.parkingfinder.data.OverpassRepository
 import com.example.parkingfinder.data.ParkingSpot
-import com.example.parkingfinder.data.PlacesRepository
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
-import com.google.android.gms.maps.model.LatLng
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import org.osmdroid.util.GeoPoint
 
 data class UiState(
     val loading: Boolean = false,
-    val me: LatLng? = null,
+    val me: GeoPoint? = null,
     val spots: List<ParkingSpot> = emptyList(),
     val selected: ParkingSpot? = null,
     val error: String? = null,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
-    private val repo = PlacesRepository(DemoPriceProvider())
+    private val repo = OverpassRepository(DemoPriceProvider())
     private val fused = LocationServices.getFusedLocationProviderClient(app)
 
     private val _state = MutableStateFlow(UiState())
@@ -39,7 +39,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val loc = fused.getCurrentLocation(
                     Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token
                 ).await() ?: error("Не вдалося отримати локацію")
-                val me = LatLng(loc.latitude, loc.longitude)
+                val me = GeoPoint(loc.latitude, loc.longitude)
+                _state.value = _state.value.copy(me = me)
                 val spots = repo.nearby(me.latitude, me.longitude)
                 _state.value = UiState(me = me, spots = spots)
             } catch (e: Exception) {

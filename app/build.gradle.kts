@@ -1,17 +1,8 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-
-// Ключ Google береться з local.properties: MAPS_API_KEY=...
-val localProps = Properties().apply {
-    val f = rootProject.file("local.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
-}
-val mapsKey: String = localProps.getProperty("MAPS_API_KEY", "")
 
 android {
     namespace = "com.example.parkingfinder"
@@ -21,15 +12,12 @@ android {
         applicationId = "com.example.parkingfinder"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
-        manifestPlaceholders["MAPS_API_KEY"] = mapsKey
-        buildConfigField("String", "MAPS_API_KEY", "\"$mapsKey\"")
+        versionCode = 2
+        versionName = "0.2"
     }
 
     buildFeatures {
         compose = true
-        buildConfig = true
     }
 
     compileOptions {
@@ -48,8 +36,10 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
 
-    implementation("com.google.maps.android:maps-compose:6.1.0")
-    implementation("com.google.android.gms:play-services-maps:19.0.0")
+    // Карта на основі OpenStreetMap, ключ не потрібен
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+
+    // Поточна локація
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")

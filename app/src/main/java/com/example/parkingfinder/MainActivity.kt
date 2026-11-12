@@ -25,10 +25,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.parkingfinder.data.ParkingSpot
 import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+
+/** Плитки Esri World Street Map (без ключа; потрібна вказівка авторства). */
+private val EsriStreet = object : OnlineTileSourceBase(
+    "EsriWorldStreet", 0, 19, 256, ".png",
+    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/"),
+    "Tiles © Esri",
+) {
+    override fun getTileURLString(pMapTileIndex: Long): String =
+        baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" +
+            MapTileIndex.getY(pMapTileIndex) + "/" + MapTileIndex.getX(pMapTileIndex)
+}
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
@@ -99,7 +111,7 @@ private fun Screen(vm: MainViewModel) {
                     modifier = Modifier.fillMaxSize(),
                     factory = { c ->
                         MapView(c).apply {
-                            setTileSource(TileSourceFactory.MAPNIK)
+                            setTileSource(EsriStreet)
                             setMultiTouchControls(true)
                             controller.setZoom(16.0)
                             controller.setCenter(GeoPoint(39.8283, -98.5795)) // центр США
@@ -136,7 +148,7 @@ private fun Screen(vm: MainViewModel) {
                     onRelease = { it.onDetach() },
                 )
                 Text(
-                    "© OpenStreetMap contributors",
+                    "Tiles © Esri · Data © OpenStreetMap contributors",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
                 )

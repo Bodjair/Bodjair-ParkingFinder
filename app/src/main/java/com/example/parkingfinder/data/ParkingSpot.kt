@@ -9,7 +9,16 @@ data class ParkingSpot(
     val pricePerHour: Double?,
     val pricePerDay: Double?,
     val isDemoPrice: Boolean,
+    val distanceM: Float = 0f,
+    val covered: Boolean = false,
+    val open247: Boolean = false,
+    val ev: Boolean = false,
+    val accessible: Boolean = false,
+    val capacity: Int? = null,
 )
+
+/** Результат пошуку адреси або місця. */
+data class Place(val label: String, val lat: Double, val lng: Double)
 
 /** Джерело цін. Замініть реалізацію на ParkWhiz/SpotHero, коли буде API-ключ. */
 interface PriceProvider {

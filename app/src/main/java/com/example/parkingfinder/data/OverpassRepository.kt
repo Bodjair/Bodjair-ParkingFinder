@@ -37,7 +37,7 @@ class OverpassRepository(private val prices: PriceProvider) {
                     setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
                     setRequestProperty(
                         "User-Agent",
-                        "ParkingFinder/0.2 (Android; github.com/Bodjair/Bodjair-ParkingFinder)"
+                        "ParkingFinder/0.3 (Android; github.com/Bodjair/Bodjair-ParkingFinder)"
                     )
                     connectTimeout = 10_000
                     readTimeout = 30_000
@@ -59,7 +59,7 @@ class OverpassRepository(private val prices: PriceProvider) {
             val query = "[out:json][timeout:15];(" +
                 "node[\"amenity\"=\"parking\"](around:$radius,$lat,$lng);" +
                 "way[\"amenity\"=\"parking\"](around:$radius,$lat,$lng);" +
-                ");out center tags 80;"
+                ");out center tags 150;"
 
             val json = JSONObject(post(query))
             val arr = json.optJSONArray("elements") ?: return@withContext emptyList()
@@ -82,7 +82,7 @@ class OverpassRepository(private val prices: PriceProvider) {
                 val name = tags.optString("name").ifBlank { tags.optString("operator") }.ifBlank { "Парковка" }
                 val street = tags.optString("addr:street")
                 val number = tags.optString("addr:housenumber")
-                val address = listOf(street, number).filter { it.isNotBlank() }.joinToString(" ")
+                val address = listOf(number, street).filter { it.isNotBlank() }.joinToString(" ")
 
                 var hourly: Double? = null
                 var daily: Double? = null
@@ -101,10 +101,35 @@ class OverpassRepository(private val prices: PriceProvider) {
                     }
                 }
 
+                val parkingType = tags.optString("parking")
+                val covered = parkingType == "multi-storey" || parkingType == "underground" ||
+                    parkingType == "rooftop" || tags.optString("covered") == "yes"
+                val open247 = tags.optString("opening_hours") == "24/7"
+                val ev = (tags.optString("capacity:charging").toIntOrNull() ?: 0) > 0
+                val disabledCap = tags.optString("capacity:disabled")
+                val accessible = (disabledCap.isNotBlank() && disabledCap != "no" && disabledCap != "0") ||
+                    tags.optString("wheelchair") == "yes"
+                val capacity = tags.optString("capacity").toIntOrNull()
+
                 val dist = FloatArray(1)
                 Location.distanceBetween(lat, lng, plat, plng, dist)
-                result += dist[0] to ParkingSpot(id, name, address, plat, plng, hourly, daily, demo)
+                result += dist[0] to ParkingSpot(
+                    id = id,
+                    name = name,
+                    address = address,
+                    lat = plat,
+                    lng = plng,
+                    pricePerHour = hourly,
+                    pricePerDay = daily,
+                    isDemoPrice = demo,
+                    distanceM = dist[0],
+                    covered = covered,
+                    open247 = open247,
+                    ev = ev,
+                    accessible = accessible,
+                    capacity = capacity,
+                )
             }
-            result.sortedBy { it.first }.take(30).map { it.second }
+            result.sortedBy { it.first }.take(60).map { it.second }
         }
 }

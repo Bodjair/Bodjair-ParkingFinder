@@ -31,12 +31,13 @@ fun computeTiers(spots: List<ParkingSpot>): Map<String, Tier> {
     }.toMap()
 }
 
-/** Малює «бейдж» з двома рядками: ціна за годину та за добу. */
-fun priceBitmap(ctx: Context, hourText: String, dayText: String, tier: Tier): Bitmap {
+/** Малює «бейдж» з двома рядками: ціна за годину та за добу. Вибраний має чорну рамку. */
+fun priceBitmap(ctx: Context, hourText: String, dayText: String, tier: Tier, selected: Boolean): Bitmap {
     val d = ctx.resources.displayMetrics.density
     val padH = 8 * d
     val padV = 5 * d
     val pointer = 7 * d
+    val m = 2 * d
 
     val bold = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = tier.textArgb; textSize = 14 * d; typeface = Typeface.DEFAULT_BOLD
@@ -51,14 +52,20 @@ fun priceBitmap(ctx: Context, hourText: String, dayText: String, tier: Tier): Bi
     val line2 = -small.fontMetrics.ascent
     val boxH = padV + line1 + 2 * d + line2 + padV + small.fontMetrics.descent
 
-    val bmp = Bitmap.createBitmap(w.toInt() + 2, (boxH + pointer).toInt() + 2, Bitmap.Config.ARGB_8888)
+    val bmp = Bitmap.createBitmap(
+        (w + 2 * m).toInt() + 1,
+        (boxH + pointer + 2 * m).toInt() + 1,
+        Bitmap.Config.ARGB_8888,
+    )
     val c = Canvas(bmp)
 
     val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = tier.argb }
     val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFFFFFFF.toInt(); style = Paint.Style.STROKE; strokeWidth = 1.5f * d
+        color = if (selected) 0xFF111111.toInt() else 0xFFFFFFFF.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = (if (selected) 3f else 1.5f) * d
     }
-    val rect = RectF(1f, 1f, w + 1f, boxH + 1f)
+    val rect = RectF(m, m, w + m, boxH + m)
     c.drawRoundRect(rect, 8 * d, 8 * d, fill)
     c.drawRoundRect(rect, 8 * d, 8 * d, stroke)
 
@@ -71,7 +78,21 @@ fun priceBitmap(ctx: Context, hourText: String, dayText: String, tier: Tier): Bi
     }
     c.drawPath(tri, fill)
 
-    c.drawText(hourText, cx, 1f + padV + line1, bold)
-    c.drawText(dayText, cx, 1f + padV + line1 + 2 * d + line2, small)
+    c.drawText(hourText, cx, m + padV + line1, bold)
+    c.drawText(dayText, cx, m + padV + line1 + 2 * d + line2, small)
+    return bmp
+}
+
+/** Кольорова крапка з білою обводкою: для «Ви тут» і центру пошуку. */
+fun dotBitmap(ctx: Context, color: Int): Bitmap {
+    val d = ctx.resources.displayMetrics.density
+    val size = (24 * d).toInt()
+    val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    val c = Canvas(bmp)
+    val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    p.color = 0xFFFFFFFF.toInt()
+    c.drawCircle(size / 2f, size / 2f, 11 * d, p)
+    p.color = color
+    c.drawCircle(size / 2f, size / 2f, 8 * d, p)
     return bmp
 }

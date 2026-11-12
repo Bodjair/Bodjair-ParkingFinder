@@ -25,10 +25,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.parkingfinder.data.ParkingSpot
 import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+
+/** Плитки CARTO на даних OpenStreetMap: без ключа, для некомерційного використання. */
+private val CartoLight = XYTileSource(
+    "CartoLight", 0, 19, 256, ".png",
+    arrayOf(
+        "https://a.basemaps.cartocdn.com/light_all/",
+        "https://b.basemaps.cartocdn.com/light_all/",
+        "https://c.basemaps.cartocdn.com/light_all/",
+    ),
+    "© OpenStreetMap contributors © CARTO",
+)
 
 class MainActivity : ComponentActivity() {
     private val vm: MainViewModel by viewModels()
@@ -37,7 +48,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Configuration.getInstance().apply {
             load(applicationContext, getSharedPreferences("osmdroid", MODE_PRIVATE))
-            userAgentValue = packageName   // обов'язково для серверів плиток OSM
+            userAgentValue = "ParkingFinder/0.2 (Android; github.com/Bodjair/Bodjair-ParkingFinder)"
         }
         setContent { MaterialTheme { Screen(vm) } }
     }
@@ -99,7 +110,7 @@ private fun Screen(vm: MainViewModel) {
                     modifier = Modifier.fillMaxSize(),
                     factory = { c ->
                         MapView(c).apply {
-                            setTileSource(TileSourceFactory.MAPNIK)
+                            setTileSource(CartoLight)
                             setMultiTouchControls(true)
                             controller.setZoom(16.0)
                             controller.setCenter(GeoPoint(39.8283, -98.5795)) // центр США
@@ -136,7 +147,7 @@ private fun Screen(vm: MainViewModel) {
                     onRelease = { it.onDetach() },
                 )
                 Text(
-                    "© OpenStreetMap contributors",
+                    "© OpenStreetMap contributors © CARTO",
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
                 )

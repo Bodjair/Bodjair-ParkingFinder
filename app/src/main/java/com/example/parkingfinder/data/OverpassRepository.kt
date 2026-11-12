@@ -17,6 +17,41 @@ class OverpassRepository(private val prices: PriceProvider) {
     private val hourRe = Regex("""(\d+(?:[.,]\d+)?)\s*(?:USD|usd|\$)?\s*/\s*(?:hour|hr|h)\b""", RegexOption.IGNORE_CASE)
     private val dayRe = Regex("""(\d+(?:[.,]\d+)?)\s*(?:USD|usd|\$)?\s*/\s*(?:day|d)\b""", RegexOption.IGNORE_CASE)
 
+    private val endpoints = listOf(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    )
+
+    /** Пробує кілька дзеркал Overpass по черзі, бо окремі сервери часто перевантажені (502/504). */
+    private fun post(query: String): String {
+        var lastCode = -1
+        var lastError: Exception? = null
+        for (url in endpoints) {
+            try {
+                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                    setRequestProperty(
+                        "User-Agent",
+                        "ParkingFinder/0.2 (Android; github.com/Bodjair/Bodjair-ParkingFinder)"
+                    )
+                    connectTimeout = 10_000
+                    readTimeout = 30_000
+                }
+                conn.outputStream.use { it.write(("data=" + URLEncoder.encode(query, "UTF-8")).toByteArray()) }
+                if (conn.responseCode in 200..299) {
+                    return conn.inputStream.bufferedReader().readText()
+                }
+                lastCode = conn.responseCode
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        error("Сервери Overpass недоступні (${if (lastCode > 0) lastCode else lastError?.message}). Спробуйте за хвилину.")
+    }
+
     suspend fun nearby(lat: Double, lng: Double, radius: Int = 1500): List<ParkingSpot> =
         withContext(Dispatchers.IO) {
             val query = "[out:json][timeout:25];(" +
@@ -24,20 +59,7 @@ class OverpassRepository(private val prices: PriceProvider) {
                 "way[\"amenity\"=\"parking\"](around:$radius,$lat,$lng);" +
                 ");out center tags 80;"
 
-            val conn = (URL("https://overpass-api.de/api/interpreter").openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                doOutput = true
-                setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                setRequestProperty("User-Agent", "ParkingFinder/0.2 (Android demo app)")
-                connectTimeout = 15_000
-                readTimeout = 30_000
-            }
-            conn.outputStream.use { it.write(("data=" + URLEncoder.encode(query, "UTF-8")).toByteArray()) }
-
-            if (conn.responseCode !in 200..299) {
-                error("Overpass ${conn.responseCode}. Спробуйте ще раз за хвилину.")
-            }
-            val json = JSONObject(conn.inputStream.bufferedReader().readText())
+            val json = JSONObject(post(query))
             val arr = json.optJSONArray("elements") ?: return@withContext emptyList()
 
             val result = mutableListOf<Pair<Float, ParkingSpot>>()

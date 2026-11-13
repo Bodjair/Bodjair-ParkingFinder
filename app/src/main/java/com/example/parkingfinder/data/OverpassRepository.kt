@@ -1,12 +1,20 @@
 package com.example.parkingfinder.data
 
 import android.location.Location
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Паркінги з OpenStreetMap через Overpass API (ключ не потрібен).
@@ -19,49 +27,94 @@ class OverpassRepository(private val prices: PriceProvider) {
 
     private val endpoints = listOf(
         "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://z.overpass-api.de/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass.openstreetmap.fr/api/interpreter",
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     )
 
-    /** Пробує кілька дзеркал Overpass по черзі, бо окремі сервери часто перевантажені (502/504). */
-    private fun post(query: String): String {
-        var lastCode = -1
-        var lastError: Exception? = null
-        for (url in endpoints) {
-            try {
-                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                    setRequestProperty(
-                        "User-Agent",
-                        "ParkingFinder/0.3 (Android; github.com/Bodjair/Bodjair-ParkingFinder)"
-                    )
-                    connectTimeout = 10_000
-                    readTimeout = 30_000
-                }
-                conn.outputStream.use { it.write(("data=" + URLEncoder.encode(query, "UTF-8")).toByteArray()) }
-                if (conn.responseCode in 200..299) {
-                    return conn.inputStream.bufferedReader().readText()
-                }
-                lastCode = conn.responseCode
-            } catch (e: Exception) {
-                lastError = e
-            }
+    /** Один запит до одного сервера. Кидає виняток, якщо відповідь не годиться. */
+    private fun request(url: String, query: String, open: MutableList<HttpURLConnection>): JSONObject {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+            setRequestProperty(
+                "User-Agent",
+                "ParkingFinder/0.3 (Android; github.com/Bodjair/Bodjair-ParkingFinder)"
+            )
+            connectTimeout = 6_000
+            readTimeout = 14_000
         }
-        error("Сервери Overpass недоступні (${if (lastCode > 0) lastCode else lastError?.message}). Спробуйте за хвилину.")
+        open += conn
+        val host = URL(url).host
+        try {
+            conn.outputStream.use { it.write(("data=" + URLEncoder.encode(query, "UTF-8")).toByteArray()) }
+            val code = conn.responseCode
+            if (code !in 200..299) error("$host: HTTP $code")
+            val json = JSONObject(conn.inputStream.bufferedReader().readText())
+            // Overpass іноді віддає 200, але з помилкою всередині (наприклад, не встиг порахувати)
+            val remark = json.optString("remark")
+            if (remark.isNotBlank() && json.optJSONArray("elements")?.length() == 0) {
+                error("$host: $remark")
+            }
+            return json
+        } finally {
+            runCatching { conn.disconnect() }
+        }
+    }
+
+    /**
+     * Запитує всі дзеркала одночасно й бере першу успішну відповідь.
+     * Окремий scope, щоб не чекати на сервери, які «зависли» (наприклад, на DNS).
+     */
+    private suspend fun fetchFirst(query: String): JSONObject {
+        val open = CopyOnWriteArrayList<HttpURLConnection>()
+        val results = Channel<Result<JSONObject>>(endpoints.size)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        try {
+            endpoints.forEach { url ->
+                scope.launch { results.send(runCatching { request(url, query, open) }) }
+            }
+            val errors = mutableListOf<String>()
+            val found = withTimeoutOrNull(20_000) {
+                var failures = 0
+                var json: JSONObject? = null
+                while (json == null && failures < endpoints.size) {
+                    val r = results.receive()
+                    json = r.getOrNull()
+                    if (json == null) {
+                        failures++
+                        errors += r.exceptionOrNull()?.message ?: "невідома помилка"
+                    }
+                }
+                json
+            }
+            if (found != null) return found
+            error(
+                "Сервери карт перевантажені або недоступні. Спробуйте ще раз за хвилину.\n" +
+                    "(${errors.firstOrNull() ?: "таймаут"})"
+            )
+        } finally {
+            scope.cancel()
+            open.forEach { runCatching { it.disconnect() } }
+        }
     }
 
     suspend fun nearby(lat: Double, lng: Double, radius: Int = 1500): List<ParkingSpot> =
         withContext(Dispatchers.IO) {
-            val query = "[out:json][timeout:15];(" +
+            val query = "[out:json][timeout:10];(" +
                 "node[\"amenity\"=\"parking\"](around:$radius,$lat,$lng);" +
                 "way[\"amenity\"=\"parking\"](around:$radius,$lat,$lng);" +
                 ");out center tags 150;"
 
-            val json = JSONObject(post(query))
+            // одна автоматична повторна спроба, якщо всі сервери зайняті
+            val json = try {
+                fetchFirst(query)
+            } catch (e: IllegalStateException) {
+                delay(1500)
+                fetchFirst(query)
+            }
             val arr = json.optJSONArray("elements") ?: return@withContext emptyList()
 
             val result = mutableListOf<Pair<Float, ParkingSpot>>()

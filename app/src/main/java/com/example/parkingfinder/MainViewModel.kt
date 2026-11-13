@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import org.osmdroid.util.GeoPoint
 
 data class UiState(
@@ -90,9 +91,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(query = "", suggestions = emptyList()) }
         launchSearch {
             _state.update { it.copy(loading = true, error = null) }
-            val loc = fused.getCurrentLocation(
-                Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token
-            ).await() ?: error("Не вдалося отримати локацію")
+            // швидка локація (Wi-Fi/мережа) з таймаутом, інакше остання відома
+            val loc = withTimeoutOrNull(10_000) {
+                fused.getCurrentLocation(
+                    Priority.PRIORITY_BALANCED_POWER_ACCURACY, CancellationTokenSource().token
+                ).await()
+            } ?: fused.lastLocation.await()
+                ?: error("Не вдалося отримати локацію. Увімкніть геолокацію або введіть адресу у пошуку.")
             val me = GeoPoint(loc.latitude, loc.longitude)
             _state.update { it.copy(me = me) }
             runSearch(me, 1500, true, 15.0)
